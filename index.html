@@ -15,6 +15,10 @@ body{font-family:-apple-system,sans-serif;background:#1a1a2e;color:#e0e0e0;heigh
 .msg.friday{align-self:flex-start;background:#0d1a0d;color:#80ffb0;border:1px solid #1a4a1a}
 .msg.error{align-self:center;background:#3e1a1a;color:#ff8080;font-size:13px}
 .msg .sender{font-size:11px;opacity:0.7;margin-bottom:4px}
+#login-screen{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px}
+#login-screen input{width:200px;padding:10px;border:1px solid #0f3460;border-radius:8px;background:#1a1a2e;color:#e0e0e0;font-size:15px;outline:none;text-align:center}
+#login-screen button{background:#0f3460;color:#e0e0e0;border:none;padding:10px 30px;border-radius:8px;font-size:15px;cursor:pointer}
+#login-screen .hint{font-size:11px;color:#555}
 #input-area{display:flex;padding:8px;background:#16213e;gap:8px}
 #input{flex:1;padding:10px;border:1px solid #0f3460;border-radius:8px;background:#1a1a2e;color:#e0e0e0;font-size:15px;outline:none}
 #send{background:#0f3460;color:#e0e0e0;border:none;padding:10px 20px;border-radius:8px;font-size:15px;cursor:pointer}
@@ -27,6 +31,7 @@ body{font-family:-apple-system,sans-serif;background:#1a1a2e;color:#e0e0e0;heigh
 </head>
 <body>
 <div id="header">Башня Старка 🗼</div>
+<div id="chat-ui" style="display:none;flex:1;flex-direction:column">
 <div id="nav">
   <button id="btn-jarvis" class="active" onclick="switchAgent('jarvis')">🤖 Джарвис</button>
   <button id="btn-friday" onclick="switchAgent('friday')">💚 Пятница</button>
@@ -37,23 +42,54 @@ body{font-family:-apple-system,sans-serif;background:#1a1a2e;color:#e0e0e0;heigh
   <input id="input" type="text" placeholder="Напиши сообщение..." autofocus autocomplete="off">
   <button id="send">→</button>
 </div>
+</div>
+<div id="login-screen">
+  <div style="color:#a0d2ff;font-size:16px">🔐 Пароль</div>
+  <input id="pass-input" type="password" placeholder="Введи пароль..." autofocus>
+  <button onclick="tryLogin()">Войти</button>
+  <div class="hint" id="login-msg"></div>
+</div>
 <script>
+let AUTH = localStorage.getItem('jarvis_auth') || '';
 const TUNNEL = 'quantities-believes-england-ticket.trycloudflare.com';
+
+if (AUTH) showChat();
+
+function tryLogin(){
+  const p = document.getElementById('pass-input').value.trim();
+  if(!p){ document.getElementById('login-msg').textContent='Введи пароль'; return; }
+  // Test auth with a ping
+  fetch(`https://${TUNNEL}/api/ping`,{headers:{'X-Auth-Password':p}})
+  .then(r=>{ if(!r.ok) throw new Error('Неверный пароль');
+    AUTH=p; localStorage.setItem('jarvis_auth',p);
+    document.getElementById('login-screen').style.display='none';
+    document.getElementById('login-msg').textContent='';
+    showChat();
+  })
+  .catch(e=>{ document.getElementById('login-msg').textContent='Неверный пароль'; });
+}
+
+function showChat(){
+  document.getElementById('chat-ui').style.display='flex';
+  initChat();
+}
+
+function initChat(){
 const API = {
-  jarvis: 'https://'+TUNNEL+'/api/chat',
-  friday: 'https://'+TUNNEL+'/api/chat/friday'
+  jarvis: `https://${TUNNEL}/api/chat`,
+  friday: `https://${TUNNEL}/api/chat/friday`
 };
 let currentAgent='jarvis',history=[];
 const msgs=document.getElementById('messages');
 const input=document.getElementById('input');
 const statusEl=document.getElementById('status');
 
-function switchAgent(a){
+window.switchAgent=function(a){
   currentAgent=a;history=[];msgs.innerHTML='';
   document.getElementById('btn-jarvis').className=a==='jarvis'?'active':'';
   document.getElementById('btn-friday').className=a==='friday'?'active':'';
   input.placeholder=a==='jarvis'?'Напиши Джарвису...':'Напиши Пятнице...';
-}
+};
 
 function addMsg(role,text,cls){
   const d=document.createElement('div');d.className='msg '+cls;
@@ -64,7 +100,7 @@ function addMsg(role,text,cls){
   return {div:d,textNode:tn};
 }
 
-function sendMsg(){
+window.sendMsg=function(){
   const text=input.value.trim();if(!text)return;
   input.value='';
   const agentName=currentAgent==='jarvis'?'Джарвис':'Пятница 💚';
@@ -72,8 +108,10 @@ function sendMsg(){
   history.push({role:'user',content:text});
   statusEl.textContent=agentName+' думает...';
 
-  fetch(API[currentAgent],{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Password':'stark-tower-2026'},
-    body:JSON.stringify({messages:history.slice(-10)})})
+  fetch(API[currentAgent],{method:'POST',
+    headers:{'Content-Type':'application/json','X-Auth-Password':AUTH},
+    body:JSON.stringify({messages:history.slice(-10)})
+  })
   .then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);
     const reader=r.body.getReader(),decoder=new TextDecoder();
     let response='';const cls=currentAgent==='jarvis'?'jarvis':'friday';
@@ -92,10 +130,12 @@ function sendMsg(){
     })();
   })
   .catch(e=>{addMsg('','Ошибка: '+e.message,'error');statusEl.textContent='Нет связи';});
-}
+};
 
 document.getElementById('send').onclick=sendMsg;
 input.onkeydown=e=>{if(e.key==='Enter')sendMsg()};
+msgs.innerHTML='';
+}
 </script>
 </body>
 </html>
