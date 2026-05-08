@@ -8,25 +8,32 @@
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,sans-serif;background:#1a1a2e;color:#e0e0e0;height:100vh;display:flex;flex-direction:column;max-width:600px;margin:0 auto}
 #header{background:#16213e;padding:12px;text-align:center;font-size:18px;font-weight:bold;border-bottom:1px solid #0f3460}
-#messages{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px}
-.msg{max-width:85%;padding:10px 14px;border-radius:12px;word-wrap:break-word;font-size:15px;line-height:1.4}
+#messages{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px;-webkit-overflow-scrolling:touch}
+.msg{max-width:85%;padding:10px 14px;border-radius:12px;word-wrap:break-word;font-size:15px;line-height:1.4;animation:fadeIn .2s}
+@keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
 .msg.user{align-self:flex-end;background:#0f3460;color:#e0e0e0}
 .msg.jarvis{align-self:flex-start;background:#1a1a3e;color:#a0d2ff;border:1px solid #0f3460}
 .msg.friday{align-self:flex-start;background:#0d1a0d;color:#80ffb0;border:1px solid #1a4a1a}
 .msg.error{align-self:center;background:#3e1a1a;color:#ff8080;font-size:13px}
 .msg .sender{font-size:11px;opacity:0.7;margin-bottom:4px}
+.msg .time{font-size:9px;opacity:0.4;text-align:right;margin-top:2px}
+#input-area{display:flex;padding:8px;background:#16213e;gap:8px;align-items:center}
+#input{flex:1;padding:10px;border:1px solid #0f3460;border-radius:8px;background:#1a1a2e;color:#e0e0e0;font-size:15px;outline:none}
+#send{background:#0f3460;color:#e0e0e0;border:none;padding:10px 20px;border-radius:8px;font-size:15px;cursor:pointer;white-space:nowrap}
+#send:active{background:#1a4a7a}
+#status{text-align:center;font-size:11px;padding:4px;color:#555}
+#nav{display:flex;justify-content:center;gap:8px;padding:6px;background:#16213e;border-bottom:1px solid #0f3460;flex-wrap:wrap}
+#nav button{background:transparent;color:#888;border:1px solid #333;padding:6px 16px;border-radius:6px;font-size:13px;cursor:pointer}
+#nav button.active{color:#fff;border-color:#0f3460;background:#0f3460}
+#commands{display:flex;justify-content:center;gap:6px;padding:4px;background:#0f1629;flex-wrap:wrap}
+#commands button{background:transparent;color:#555;border:none;padding:4px 10px;font-size:10px;cursor:pointer;border-radius:3px}
+#commands button:active{color:#a0d2ff;background:#0f3460}
 #login-screen{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px}
 #login-screen input{width:200px;padding:10px;border:1px solid #0f3460;border-radius:8px;background:#1a1a2e;color:#e0e0e0;font-size:15px;outline:none;text-align:center}
 #login-screen button{background:#0f3460;color:#e0e0e0;border:none;padding:10px 30px;border-radius:8px;font-size:15px;cursor:pointer}
 #login-screen .hint{font-size:11px;color:#555}
-#input-area{display:flex;padding:8px;background:#16213e;gap:8px}
-#input{flex:1;padding:10px;border:1px solid #0f3460;border-radius:8px;background:#1a1a2e;color:#e0e0e0;font-size:15px;outline:none}
-#send{background:#0f3460;color:#e0e0e0;border:none;padding:10px 20px;border-radius:8px;font-size:15px;cursor:pointer}
-#send:active{background:#1a4a7a}
-#status{text-align:center;font-size:11px;padding:4px;color:#555}
-#nav{display:flex;justify-content:center;gap:8px;padding:6px;background:#16213e;border-bottom:1px solid #0f3460}
-#nav button{background:transparent;color:#888;border:1px solid #333;padding:6px 16px;border-radius:6px;font-size:13px;cursor:pointer}
-#nav button.active{color:#fff;border-color:#0f3460;background:#0f3460}
+#typing{font-size:11px;color:#555;align-self:flex-start;margin-left:14px;margin-top:2px}
+input:disabled,button:disabled{opacity:.4}
 </style>
 </head>
 <body>
@@ -36,10 +43,15 @@ body{font-family:-apple-system,sans-serif;background:#1a1a2e;color:#e0e0e0;heigh
   <button id="btn-jarvis" class="active" onclick="switchAgent('jarvis')">🤖 Джарвис</button>
   <button id="btn-friday" onclick="switchAgent('friday')">💚 Пятница</button>
 </div>
+<div id="commands">
+  <button onclick="newSession()" title="Новая сессия">🔄 Новый чат</button>
+  <button onclick="toggleTheme()" title="Тема">🌓</button>
+</div>
 <div id="messages"></div>
+<div id="typing" style="display:none"></div>
 <div id="status">На связи</div>
 <div id="input-area">
-  <input id="input" type="text" placeholder="Напиши сообщение..." autofocus autocomplete="off">
+  <input id="input" type="text" placeholder="Напиши сообщение..." autofocus autocomplete="off" maxlength="500">
   <button id="send">→</button>
 </div>
 </div>
@@ -50,92 +62,132 @@ body{font-family:-apple-system,sans-serif;background:#1a1a2e;color:#e0e0e0;heigh
   <div class="hint" id="login-msg"></div>
 </div>
 <script>
-let AUTH = localStorage.getItem('jarvis_auth') || '';
-const TUNNEL = 'quantities-believes-england-ticket.trycloudflare.com';
+// ==== CONFIG ====
+const TUNNEL='quantities-believes-england-ticket.trycloudflare.com';
+const API={jarvis: `https://${TUNNEL}/api/chat`, friday: `https://${TUNNEL}/api/chat/friday`};
+let AUTH=localStorage.getItem('jarvis_auth')||'';
+if(AUTH)showChat();
 
-if (AUTH) showChat();
-
+// ==== AUTH ====
 function tryLogin(){
-  const p = document.getElementById('pass-input').value.trim();
-  if(!p){ document.getElementById('login-msg').textContent='Введи пароль'; return; }
-  // Test auth with a ping
+  const p=document.getElementById('pass-input').value.trim();
+  if(!p){document.getElementById('login-msg').textContent='Введи пароль';return;}
   fetch(`https://${TUNNEL}/api/ping`,{headers:{'X-Auth-Password':p}})
-  .then(r=>{ if(!r.ok) throw new Error('Неверный пароль');
-    AUTH=p; localStorage.setItem('jarvis_auth',p);
+  .then(r=>{if(!r.ok)throw new Error('wrong');
+    AUTH=p;localStorage.setItem('jarvis_auth',p);
     document.getElementById('login-screen').style.display='none';
-    document.getElementById('login-msg').textContent='';
     showChat();
-  })
-  .catch(e=>{ document.getElementById('login-msg').textContent='Неверный пароль'; });
+  }).catch(()=>{document.getElementById('login-msg').textContent='Неверный пароль';});
 }
 
-function showChat(){
-  document.getElementById('chat-ui').style.display='flex';
-  initChat();
-}
+// ==== CHAT ====
+let currentAgent='jarvis',history=[],streaming=!1;
+const msgs=document.getElementById('messages'),input=document.getElementById('input'),
+  statusEl=document.getElementById('status'),typing=document.getElementById('typing'),
+  jarvisBtn=document.getElementById('btn-jarvis'),fridayBtn=document.getElementById('btn-friday');
 
-function initChat(){
-const API = {
-  jarvis: `https://${TUNNEL}/api/chat`,
-  friday: `https://${TUNNEL}/api/chat/friday`
-};
-let currentAgent='jarvis',history=[];
-const msgs=document.getElementById('messages');
-const input=document.getElementById('input');
-const statusEl=document.getElementById('status');
+// Load history from localStorage
+function loadHistory(){try{let h=localStorage.getItem('chat_'+currentAgent);if(h)history=JSON.parse(h);}catch(e){}}
+function saveHistory(){try{localStorage.setItem('chat_'+currentAgent,JSON.stringify(history));}catch(e){}}
+function newSession(){history=[];saveHistory();msgs.innerHTML='';statusEl.textContent='Новая сессия';}
+function toggleTheme(){document.body.style.filter=document.body.style.filter?'':'invert(0.9) hue-rotate(180deg)';}
 
 window.switchAgent=function(a){
-  currentAgent=a;history=[];msgs.innerHTML='';
-  document.getElementById('btn-jarvis').className=a==='jarvis'?'active':'';
-  document.getElementById('btn-friday').className=a==='friday'?'active':'';
+  currentAgent=a;history=[];msgs.innerHTML='';loadHistory();
+  jarvisBtn.className=a==='jarvis'?'active':'';fridayBtn.className=a==='friday'?'active':'';
   input.placeholder=a==='jarvis'?'Напиши Джарвису...':'Напиши Пятнице...';
+  // Render loaded history
+  history.forEach(h=>{
+    if(h.role==='user')renderMsg('Вы',h.content,'user');
+    else renderMsg(a==='jarvis'?'Джарвис':'Пятница 💚',h.content,a);
+  });
 };
 
-function addMsg(role,text,cls){
+function renderMsg(role,text,cls){
   const d=document.createElement('div');d.className='msg '+cls;
   const sd=document.createElement('div');sd.className='sender';sd.textContent=role;
   d.appendChild(sd);
   const tn=document.createTextNode(text);d.appendChild(tn);
+  const td=document.createElement('div');td.className='time';
+  td.textContent=new Date().toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'});
+  d.appendChild(td);
   msgs.appendChild(d);msgs.scrollTop=msgs.scrollHeight;
   return {div:d,textNode:tn};
 }
 
-window.sendMsg=function(){
+function sendMsg(){
+  if(streaming)return;
   const text=input.value.trim();if(!text)return;
-  input.value='';
+  input.value='';input.disabled=!0;document.getElementById('send').disabled=!0;
   const agentName=currentAgent==='jarvis'?'Джарвис':'Пятница 💚';
-  addMsg('Вы',text,'user');
-  history.push({role:'user',content:text});
-  statusEl.textContent=agentName+' думает...';
+  renderMsg('Вы',text,'user');
+  history.push({role:'user',content:text});saveHistory();
+  statusEl.textContent=agentName+' думает...';typing.style.display='block';typing.textContent='...';
 
+  let response='',lineBuf=''; // accumulate partial SSE lines across chunks
+  const decoder=new TextDecoder(); // single persistent decoder for the stream
+  
   fetch(API[currentAgent],{method:'POST',
     headers:{'Content-Type':'application/json','X-Auth-Password':AUTH},
     body:JSON.stringify({messages:history.slice(-10)})
   })
   .then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);
-    const reader=r.body.getReader(),decoder=new TextDecoder();
-    let response='';const cls=currentAgent==='jarvis'?'jarvis':'friday';
-    const el=addMsg(agentName,'',cls);
-    (function read(){
+    const reader=r.body.getReader();
+    const cls=currentAgent==='jarvis'?'jarvis':'friday';
+    const el=renderMsg(agentName,'',cls);
+    streaming=!0;
+    
+    let dots=0,dotTimer=setInterval(()=>{typing.textContent='.'.repeat(++dots%4)||'...';},400);
+    
+    function read(){
       reader.read().then(({done,value})=>{
-        if(done){history.push({role:'assistant',content:response});statusEl.textContent='На связи';return;}
-        const chunk=decoder.decode(value,{stream:true});
-        const lines=chunk.split('\n');
-        for(const l of lines){if(l.startsWith('data: ')){try{
-          const c=JSON.parse(l.slice(6)).choices?.[0]?.delta?.content;
-          if(c){response+=c;el.textNode.textContent=response;msgs.scrollTop=msgs.scrollHeight;}
-        }catch(e){}}}
+        if(done){
+          clearInterval(dotTimer);typing.style.display='none';streaming=!1;
+          input.disabled=!1;document.getElementById('send').disabled=!1;
+          input.focus();
+          history.push({role:'assistant',content:response});saveHistory();
+          statusEl.textContent='На связи';
+          return;
+        }
+        // Append decoded chunk to line buffer
+        lineBuf+=decoder.decode(value,{stream:true});
+        // Process complete lines
+        let idx;
+        while((idx=lineBuf.indexOf('\n'))!==-1){
+          const line=lineBuf.substring(0,idx);
+          lineBuf=lineBuf.substring(idx+1);
+          if(line.startsWith('data: ')){
+            try{
+              const c=JSON.parse(line.slice(6)).choices?.[0]?.delta?.content;
+              if(c){response+=c;el.textNode.textContent=response;msgs.scrollTop=msgs.scrollHeight;}
+            }catch(e){}
+          }
+        }
         read();
       });
-    })();
+    }
+    read();
   })
-  .catch(e=>{addMsg('','Ошибка: '+e.message,'error');statusEl.textContent='Нет связи';});
-};
+  .catch(e=>{
+    typing.style.display='none';streaming=!1;
+    input.disabled=!1;document.getElementById('send').disabled=!1;
+    renderMsg('','Ошибка: '+e.message,'error');statusEl.textContent='Нет связи';
+  });
+}
+
+function showChat(){
+  document.getElementById('chat-ui').style.display='flex';
+  loadHistory();
+  // Render loaded history
+  history.forEach(h=>{
+    if(h.role==='user')renderMsg('Вы',h.content,'user');
+    else renderMsg(currentAgent==='jarvis'?'Джарвис':'Пятница 💚',h.content,currentAgent);
+  });
+  input.focus();
+}
 
 document.getElementById('send').onclick=sendMsg;
 input.onkeydown=e=>{if(e.key==='Enter')sendMsg()};
-msgs.innerHTML='';
-}
 </script>
 </body>
 </html>
