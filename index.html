@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>Джарвис 🤖</title>
+<title>Башня Старка 🗼</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,sans-serif;background:#1a1a2e;color:#e0e0e0;height:100vh;display:flex;flex-direction:column;max-width:600px;margin:0 auto}
@@ -38,96 +38,64 @@ body{font-family:-apple-system,sans-serif;background:#1a1a2e;color:#e0e0e0;heigh
   <button id="send">→</button>
 </div>
 <script>
-// === CONFIG ===
 const TUNNEL = 'quantities-believes-england-ticket.trycloudflare.com';
 const API = {
-  jarvis: `https://${TUNNEL}/api/chat`,
-  friday: `https://${TUNNEL}/api/chat/friday`
+  jarvis: 'https://'+TUNNEL+'/api/chat',
+  friday: 'https://'+TUNNEL+'/api/chat/friday'
 };
+let currentAgent='jarvis',history=[];
+const msgs=document.getElementById('messages');
+const input=document.getElementById('input');
+const statusEl=document.getElementById('status');
 
-let currentAgent = 'jarvis';
-let history = [];
-const msgs = document.getElementById('messages');
-const input = document.getElementById('input');
-const statusEl = document.getElementById('status');
-
-function switchAgent(agent) {
-  currentAgent = agent;
-  history = [];
-  msgs.innerHTML = '';
-  document.getElementById('btn-jarvis').className = agent==='jarvis'?'active':'';
-  document.getElementById('btn-friday').className = agent==='friday'?'active':'';
-  input.placeholder = agent==='jarvis' ? 'Напиши Джарвису...' : 'Напиши Пятнице...';
+function switchAgent(a){
+  currentAgent=a;history=[];msgs.innerHTML='';
+  document.getElementById('btn-jarvis').className=a==='jarvis'?'active':'';
+  document.getElementById('btn-friday').className=a==='friday'?'active':'';
+  input.placeholder=a==='jarvis'?'Напиши Джарвису...':'Напиши Пятнице...';
 }
 
-function addMsg(role, text, cls) {
-  const d = document.createElement('div');
-  d.className = 'msg ' + cls;
-  const sd = document.createElement('div');
-  sd.className = 'sender';
-  sd.textContent = role;
+function addMsg(role,text,cls){
+  const d=document.createElement('div');d.className='msg '+cls;
+  const sd=document.createElement('div');sd.className='sender';sd.textContent=role;
   d.appendChild(sd);
-  const tn = document.createTextNode('');
-  d.appendChild(tn);
-  msgs.appendChild(d);
-  tn.textContent = text;
-  msgs.scrollTop = msgs.scrollHeight;
-  return tn;
+  const tn=document.createTextNode(text);d.appendChild(tn);
+  msgs.appendChild(d);msgs.scrollTop=msgs.scrollHeight;
+  return {div:d,textNode:tn};
 }
 
-function sendMsg() {
-  const text = input.value.trim();
-  if (!text) return;
-  input.value = '';
-  const agentName = currentAgent === 'jarvis' ? 'Джарвис' : 'Пятница 💚';
-  addMsg('Вы', text, 'user');
+function sendMsg(){
+  const text=input.value.trim();if(!text)return;
+  input.value='';
+  const agentName=currentAgent==='jarvis'?'Джарвис':'Пятница 💚';
+  addMsg('Вы',text,'user');
   history.push({role:'user',content:text});
-  statusEl.textContent = agentName + ' думает...';
+  statusEl.textContent=agentName+' думает...';
 
-  fetch(API[currentAgent], {
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({messages:history.slice(-10)})
-  })
-  .then(r => {
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    const reader = r.body.getReader();
-    const decoder = new TextDecoder();
-    let response = '';
-    const cls = currentAgent === 'jarvis' ? 'jarvis' : 'friday';
-    const tn = addMsg(agentName, '', cls);
-    
-    function read() {
-      reader.read().then(({done,value}) => {
-        if (done) {
-          history.push({role:'assistant',content:response});
-          statusEl.textContent = 'На связи';
-          return;
-        }
-        const chunk = decoder.decode(value, {stream:true});
-        const lines = chunk.split('\n');
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            try {
-              const j = JSON.parse(line.slice(6));
-              const c = j.choices?.[0]?.delta?.content;
-              if (c) { response += c; tn.textContent = response; msgs.scrollTop = msgs.scrollHeight; }
-            } catch(e) {}
-          }
-        }
+  fetch(API[currentAgent],{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({messages:history.slice(-10)})})
+  .then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);
+    const reader=r.body.getReader(),decoder=new TextDecoder();
+    let response='';const cls=currentAgent==='jarvis'?'jarvis':'friday';
+    const el=addMsg(agentName,'',cls);
+    (function read(){
+      reader.read().then(({done,value})=>{
+        if(done){history.push({role:'assistant',content:response});statusEl.textContent='На связи';return;}
+        const chunk=decoder.decode(value,{stream:true});
+        const lines=chunk.split('\n');
+        for(const l of lines){if(l.startsWith('data: ')){try{
+          const c=JSON.parse(l.slice(6)).choices?.[0]?.delta?.content;
+          if(c){response+=c;el.textNode.textContent=response;msgs.scrollTop=msgs.scrollHeight;}
+        }catch(e){}}}
         read();
       });
-    }
-    read();
+    })();
   })
-  .catch(e => {
-    addMsg('', 'Ошибка: ' + e.message, 'error');
-    statusEl.textContent = 'Нет связи с сервером';
-  });
+  .catch(e=>{addMsg('','Ошибка: '+e.message,'error');statusEl.textContent='Нет связи';});
 }
 
-document.getElementById('send').addEventListener('click', sendMsg);
-input.addEventListener('keydown', e => { if (e.key === 'Enter') sendMsg(); });
+document.getElementById('send').onclick=sendMsg;
+input.onkeydown=e=>{if(e.key==='Enter')sendMsg()};
 </script>
 </body>
 </html>
