@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Джарвис 🤖</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,sans-serif;background:#1a1a2e;color:#e0e0e0;height:100vh;display:flex;flex-direction:column;max-width:600px;margin:0 auto}
+#header{background:#16213e;padding:12px;text-align:center;font-size:18px;font-weight:bold;border-bottom:1px solid #0f3460}
+#messages{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px}
+.msg{max-width:85%;padding:10px 14px;border-radius:12px;word-wrap:break-word;font-size:15px;line-height:1.4}
+.msg.user{align-self:flex-end;background:#0f3460;color:#e0e0e0}
+.msg.jarvis{align-self:flex-start;background:#1a1a3e;color:#a0d2ff;border:1px solid #0f3460}
+.msg.friday{align-self:flex-start;background:#0d1a0d;color:#80ffb0;border:1px solid #1a4a1a}
+.msg.error{align-self:center;background:#3e1a1a;color:#ff8080;font-size:13px}
+.msg .sender{font-size:11px;opacity:0.7;margin-bottom:4px}
+#input-area{display:flex;padding:8px;background:#16213e;gap:8px}
+#input{flex:1;padding:10px;border:1px solid #0f3460;border-radius:8px;background:#1a1a2e;color:#e0e0e0;font-size:15px;outline:none}
+#send{background:#0f3460;color:#e0e0e0;border:none;padding:10px 20px;border-radius:8px;font-size:15px;cursor:pointer}
+#send:active{background:#1a4a7a}
+#status{text-align:center;font-size:11px;padding:4px;color:#555}
+#nav{display:flex;justify-content:center;gap:8px;padding:6px;background:#16213e;border-bottom:1px solid #0f3460}
+#nav button{background:transparent;color:#888;border:1px solid #333;padding:6px 16px;border-radius:6px;font-size:13px;cursor:pointer}
+#nav button.active{color:#fff;border-color:#0f3460;background:#0f3460}
+</style>
+</head>
+<body>
+<div id="header">Башня Старка 🗼</div>
+<div id="nav">
+  <button id="btn-jarvis" class="active" onclick="switchAgent('jarvis')">🤖 Джарвис</button>
+  <button id="btn-friday" onclick="switchAgent('friday')">💚 Пятница</button>
+</div>
+<div id="messages"></div>
+<div id="status">На связи</div>
+<div id="input-area">
+  <input id="input" type="text" placeholder="Напиши сообщение..." autofocus autocomplete="off">
+  <button id="send">→</button>
+</div>
+<script>
+// === CONFIG ===
+const TUNNEL = 'quantities-believes-england-ticket.trycloudflare.com';
+const API = {
+  jarvis: `https://${TUNNEL}/api/chat`,
+  friday: `https://${TUNNEL}/api/chat/friday`
+};
+
+let currentAgent = 'jarvis';
+let history = [];
+const msgs = document.getElementById('messages');
+const input = document.getElementById('input');
+const statusEl = document.getElementById('status');
+
+function switchAgent(agent) {
+  currentAgent = agent;
+  history = [];
+  msgs.innerHTML = '';
+  document.getElementById('btn-jarvis').className = agent==='jarvis'?'active':'';
+  document.getElementById('btn-friday').className = agent==='friday'?'active':'';
+  input.placeholder = agent==='jarvis' ? 'Напиши Джарвису...' : 'Напиши Пятнице...';
+}
+
+function addMsg(role, text, cls) {
+  const d = document.createElement('div');
+  d.className = 'msg ' + cls;
+  const sd = document.createElement('div');
+  sd.className = 'sender';
+  sd.textContent = role;
+  d.appendChild(sd);
+  const tn = document.createTextNode('');
+  d.appendChild(tn);
+  msgs.appendChild(d);
+  tn.textContent = text;
+  msgs.scrollTop = msgs.scrollHeight;
+  return tn;
+}
+
+function sendMsg() {
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = '';
+  const agentName = currentAgent === 'jarvis' ? 'Джарвис' : 'Пятница 💚';
+  addMsg('Вы', text, 'user');
+  history.push({role:'user',content:text});
+  statusEl.textContent = agentName + ' думает...';
+
+  fetch(API[currentAgent], {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({messages:history.slice(-10)})
+  })
+  .then(r => {
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const reader = r.body.getReader();
+    const decoder = new TextDecoder();
+    let response = '';
+    const cls = currentAgent === 'jarvis' ? 'jarvis' : 'friday';
+    const tn = addMsg(agentName, '', cls);
+    
+    function read() {
+      reader.read().then(({done,value}) => {
+        if (done) {
+          history.push({role:'assistant',content:response});
+          statusEl.textContent = 'На связи';
+          return;
+        }
+        const chunk = decoder.decode(value, {stream:true});
+        const lines = chunk.split('\n');
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const j = JSON.parse(line.slice(6));
+              const c = j.choices?.[0]?.delta?.content;
+              if (c) { response += c; tn.textContent = response; msgs.scrollTop = msgs.scrollHeight; }
+            } catch(e) {}
+          }
+        }
+        read();
+      });
+    }
+    read();
+  })
+  .catch(e => {
+    addMsg('', 'Ошибка: ' + e.message, 'error');
+    statusEl.textContent = 'Нет связи с сервером';
+  });
+}
+
+document.getElementById('send').addEventListener('click', sendMsg);
+input.addEventListener('keydown', e => { if (e.key === 'Enter') sendMsg(); });
+</script>
+</body>
+</html>
