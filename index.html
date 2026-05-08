@@ -23,7 +23,7 @@ a:hover{background:#1a4a7a}
 fetch('tunnel.json',{cache:'no-cache'})
 .then(r=>r.json())
 .then(cfg=>{
-  document.getElementById('link').href=cfg.tunnel;
+  document.getElementById('link').href='https://'+cfg.tunnel;
   document.getElementById('loading').style.display='none';
 })
 .catch(()=>{
