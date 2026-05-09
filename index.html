@@ -19,6 +19,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 .msg.assistant{background:#21262d;align-self:flex-start;border-bottom-left-radius:4px;border:1px solid #30363d}
 .msg .agent-badge{font-size:11px;opacity:.7;margin-bottom:4px;display:flex;align-items:center;gap:4px}
 .msg .time{font-size:10px;color:#8b949e;margin-top:4px;text-align:right;opacity:.6}
+.mode-btn{padding:4px 10px;border-radius:6px;border:1px solid #30363d;background:transparent;color:#8b949e;cursor:pointer;font-size:11px;transition:.2s}
+.mode-btn:hover{color:#e6edf3;border-color:#8b949e}
 .msg .content{white-space:pre-wrap;word-break:break-word}
 .msg .content code{background:#161b22;padding:2px 6px;border-radius:4px;font-size:13px}
 .msg .content pre{background:#161b22;padding:10px;border-radius:6px;margin:6px 0;overflow-x:auto}
@@ -67,6 +69,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
   <h1>🗼 Jarvis Chat</h1>
   <button class="agent-btn friday active" data-agent="friday" onclick="switchAgent('friday')">💚 Пятница</button>
   <button class="agent-btn jarvis" data-agent="jarvis" onclick="switchAgent('jarvis')">🤖 Джарвис</button>
+  <button id="modeBtn" class="mode-btn" onclick="toggleMode()" title="Переключить режим отправки">🌊 Стрим</button>
 </div>
 <div class="chat" id="chat">
   <div class="welcome" id="welcome">
@@ -114,12 +117,18 @@ async function checkPassword() {
 // === Chat logic ===
 let currentAgent = 'friday';
 let abortController = null;
+let useStream = true;
 
 function switchAgent(agent) {
   currentAgent = agent;
   document.querySelectorAll('.agent-btn').forEach(b => b.classList.remove('active'));
   document.querySelector(`.agent-btn.${agent}`).classList.add('active');
   document.getElementById('input').focus();
+}
+
+function toggleMode() {
+  useStream = !useStream;
+  document.getElementById('modeBtn').textContent = useStream ? '🌊 Стрим' : '📦 Обычный';
 }
 
 function getModel() {
@@ -163,110 +172,208 @@ async function send() {
     }
     messages.push({role: 'user', content: text});
 
-    const body = {
-      model: getModel(),
-      messages: messages,
-      stream: true,
-      max_tokens: 8192
-    };
-
     const url = API_BASE + getEndpoint();
     const headers = {
       'Content-Type': 'application/json',
       'Authorization': 'Bearer stark-tower-2026'
     };
 
-    abortController = new AbortController();
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: headers,
-      body: JSON.stringify(body),
-      signal: abortController.signal
-    });
-
-    typingEl.remove();
-
-    if (!response.ok) {
-      addMsg(`Ошибка: ${response.status}${response.status === 401 ? ' — неверный пароль на сервере' : ''}`, 'assistant');
-      document.getElementById('sendBtn').disabled = false;
-      return;
+    if (useStream) {
+      await sendStream(url, headers, messages, typingEl);
+    } else {
+      await sendBatch(url, headers, messages, typingEl);
     }
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder('utf-8', {stream: true});
-    let content = '';
-    let buffer = '';
-    const msgEl = addMsg('', 'assistant');
-
-    let streamOk = true;
-    let gotDone = false;
-    while (true) {
-      let chunk;
-      try {
-        const result = await reader.read();
-        if (result.done) break;
-        chunk = result.value;
-      } catch(e) {
-        console.error('Stream error:', e);
-        streamOk = false;
-        break;
-      }
-
-      buffer += decoder.decode(chunk, {stream: true});
-
-      let idx;
-      while ((idx = buffer.indexOf('\n')) !== -1) {
-        const line = buffer.slice(0, idx).trim();
-        buffer = buffer.slice(idx + 1);
-        if (!line.startsWith('data: ')) continue;
-        if (line === 'data: [DONE]') { gotDone = true; continue; }
-        try {
-          const json = JSON.parse(line.slice(6));
-          const d = json.choices?.[0]?.delta?.content;
-          if (d) { content += d; }
-        } catch(e) { continue; }
-      }
-
-      if (content) {
-        msgEl.querySelector('.content').textContent = content;
-        document.getElementById('chat').scrollTop = document.getElementById('chat').scrollHeight;
-      }
-    }
-
-    // Process remaining buffer
-    if (buffer.trim().startsWith('data: ')) {
-      const line = buffer.trim();
-      if (line === 'data: [DONE]') { gotDone = true; }
-      else if (line.startsWith('data: ')) {
-        try {
-          const json = JSON.parse(line.slice(6));
-          const d = json.choices?.[0]?.delta?.content;
-          if (d) { content += d; }
-        } catch(e) {}
-      }
-    }
-
-    if (content) {
-      msgEl.querySelector('.content').innerHTML = formatCode(content);
-      saveHistory();
-      if (!gotDone && content.length > 10) {
-        const contBtn = document.createElement('div');
-        contBtn.style.cssText = 'text-align:center;margin:8px 0';
-        contBtn.innerHTML = '<button onclick="continueChat()" style="background:#21262d;color:#e6edf3;border:1px solid #30363d;border-radius:6px;padding:6px 16px;font-size:13px;cursor:pointer">📌 Продолжить</button>';
-        document.getElementById('chat').appendChild(contBtn);
-        document.getElementById('chat').scrollTop = document.getElementById('chat').scrollHeight;
-      }
-    } else if (!streamOk) {
-      addMsg('⚠️ Соединение прервано. Попробуй ещё раз.', 'assistant');
-    }
-
   } catch(e) {
-    typingEl.remove();
+    document.getElementById('typing')?.remove();
     if (e.name !== 'AbortError') {
       addMsg('Ошибка соединения: ' + e.message, 'assistant');
     }
   }
   document.getElementById('sendBtn').disabled = false;
+}
+
+async function sendStream(url, headers, messages, typingEl) {
+  const body = {
+    model: getModel(),
+    messages: messages,
+    stream: true,
+    max_tokens: 8192
+  };
+
+  abortController = new AbortController();
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: headers,
+    body: JSON.stringify(body),
+    signal: abortController.signal
+  });
+
+  typingEl.remove();
+
+  if (!response.ok) {
+    addMsg(`Ошибка: ${response.status}${response.status === 401 ? ' — неверный пароль на сервере' : ''}`, 'assistant');
+    return;
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder('utf-8', {stream: true});
+  let content = '';
+  let buffer = '';
+  const msgEl = addMsg('', 'assistant');
+
+  let streamOk = true;
+  let gotDone = false;
+  while (true) {
+    let chunk;
+    try {
+      const result = await reader.read();
+      if (result.done) break;
+      chunk = result.value;
+    } catch(e) {
+      console.error('Stream error:', e);
+      streamOk = false;
+      break;
+    }
+
+    buffer += decoder.decode(chunk, {stream: true});
+
+    let idx;
+    while ((idx = buffer.indexOf('\n')) !== -1) {
+      const line = buffer.slice(0, idx).trim();
+      buffer = buffer.slice(idx + 1);
+      if (!line.startsWith('data: ')) continue;
+      if (line === 'data: [DONE]') { gotDone = true; continue; }
+      try {
+        const json = JSON.parse(line.slice(6));
+        const d = json.choices?.[0]?.delta?.content;
+        if (d) { content += d; }
+      } catch(e) { continue; }
+    }
+
+    if (content) {
+      msgEl.querySelector('.content').textContent = content;
+      document.getElementById('chat').scrollTop = document.getElementById('chat').scrollHeight;
+    }
+  }
+
+  // Process remaining buffer
+  if (buffer.trim().startsWith('data: ')) {
+    const line = buffer.trim();
+    if (line === 'data: [DONE]') { gotDone = true; }
+    else if (line.startsWith('data: ')) {
+      try {
+        const json = JSON.parse(line.slice(6));
+        const d = json.choices?.[0]?.delta?.content;
+        if (d) { content += d; }
+      } catch(e) {}
+    }
+  }
+
+  if (content) {
+    msgEl.querySelector('.content').innerHTML = formatCode(content);
+    saveHistory();
+    if (!gotDone && content.length > 10) {
+      showInterrupted(msgEl, content);
+    }
+  } else if (!streamOk) {
+    // Stream failed completely — auto-fallback to non-streaming
+    addMsg('⚠️ Стрим прерван. Пробую обычный режим...', 'assistant');
+    msgEl.remove();
+    await sendBatch(url, headers, messages, null);
+  }
+}
+
+async function sendBatch(url, headers, messages, typingEl) {
+  // Remove the last user message if it was already added by send()
+  const body = {
+    model: getModel(),
+    messages: messages,
+    stream: false,
+    max_tokens: 8192
+  };
+
+  if (typingEl) typingEl.remove();
+
+  // Show spinner/loading
+  const loadingEl = document.createElement('div');
+  loadingEl.className = 'typing';
+  loadingEl.id = 'batch-loading';
+  loadingEl.innerHTML = '<span></span><span></span><span></span>';
+  document.getElementById('chat').appendChild(loadingEl);
+  document.getElementById('chat').scrollTop = document.getElementById('chat').scrollHeight;
+
+  try {
+    abortController = new AbortController();
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: headers,
+      body: JSON.stringify(body),
+      signal: abortController.signal,
+      timeout: 300000
+    });
+
+    document.getElementById('batch-loading')?.remove();
+
+    if (!response.ok) {
+      addMsg(`Ошибка: ${response.status}`, 'assistant');
+      return;
+    }
+
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content || '';
+    if (content) {
+      const msgEl = addMsg('', 'assistant');
+      msgEl.querySelector('.content').innerHTML = formatCode(content);
+      saveHistory();
+    } else {
+      addMsg('⚠️ Пустой ответ от сервера', 'assistant');
+    }
+  } catch(e) {
+    document.getElementById('batch-loading')?.remove();
+    throw e;
+  }
+}
+
+function showInterrupted(msgEl, content) {
+  // Show a banner that the response was cut short
+  const banner = document.createElement('div');
+  banner.style.cssText = 'text-align:center;margin:4px 0;padding:6px;background:#161b22;border:1px solid #30363d;border-radius:8px;font-size:12px;color:#8b949e';
+  banner.innerHTML = '⚠️ <strong>Ответ обрезан</strong> — нестабильное соединение. ' +
+    '<a href="#" onclick="continueChat();return false" style="color:#58a6ff">Продолжить</a> | ' +
+    '<a href="#" onclick="rerunLastBatch();return false" style="color:#58a6ff">Отправить без стрима</a>';
+  document.getElementById('chat').appendChild(banner);
+}
+
+function rerunLastBatch() {
+  const msgs = [];
+  document.querySelectorAll('.msg.assistant, .msg.user').forEach(el => {
+    msgs.push({
+      role: el.classList.contains('user') ? 'user' : 'assistant',
+      content: el.querySelector('.content')?.textContent || ''
+    });
+  });
+  // Remove last assistant message to retry
+  if (msgs.length > 0 && msgs[msgs.length-1].role === 'assistant') {
+    const lastMsg = document.querySelector('.chat > .msg:last-child');
+    lastMsg?.remove();
+    msgs.pop();
+  }
+  // Remove the banner
+  const banner = document.querySelector('.chat > div:last-child');
+  if (banner && !banner.classList.contains('msg')) banner.remove();
+
+  // Save stream mode for this retry
+  const wasStream = useStream;
+  useStream = false;
+  
+  const url = API_BASE + getEndpoint();
+  const headers = {
+    'Content-Type': 'application/json',
+    'Authorization': 'Bearer stark-tower-2026'
+  };
+  sendBatch(url, headers, msgs, null);
+
+  useStream = wasStream;
 }
 
 function addMsg(text, role) {
